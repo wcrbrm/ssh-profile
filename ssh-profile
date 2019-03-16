@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+# in case of debug - print stacktraces on errors
+[[ -n $DEBUG ]] && set -x
+
+# exit on first error (-e)
+# exit on undefined variable (-u)
+# exit on return value != 0 (-o pipefall)
+set -eou pipefail
+IFS=$'\n\t'
+SELF_CMD="$0"
+
+usage() {
+  cat <<"EOF"
+USAGE:
+  ssh-profile            : list all available ssh profiles.
+  ssh-profile <NAME>     : change the active ssh profile of current context
+  ssh-profile -h,--help  : show this message
+EOF
+}
+
+exit_err() {
+   echo >&2 "${1}"
+   exit 1
+}
+
+get_profiles() {
+  find $HOME/.ssh-* -type d | rev | cut -f1 -d '/' | rev | sed s/\.ssh-//
+}
+
+current_profile() {
+  if [ -f "$HOME/.ssh/profile" ]; then
+    cat $HOME/.ssh/profile
+  fi
+}
+
+list_profiles() {
+  local yellow darkbg normal
+  yellow=$(tput setaf 3 || true)
+  darkbg=$(tput setab 0 || true)
+  normal=$(tput sgr0 || true)
+
+  local cur_ctx_fg cur_ctx_bg
+  cur_ctx_fg=${CURRENT_FGCOLOR:-$yellow}
+  cur_ctx_bg=${CURRENT_BGCOLOR:-$darkbg}
+
+  local cur ns_list
+  cur="$(current_profile)" || exit_err "error getting current profile"
+  profiles_list=$(get_profiles) || exit_err "error getting profiles list"
+
+  for c in $profiles_list; do
+  if [[ -n "${FORCE_COLOR:-}" || -t 1 && -z "${NO_COLOR:-}" ]]; then
+    # colored output mode
+    if [[ "${c}" = "${cur}" ]]; then
+      echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
+    else
+      echo "${c}"
+    fi
+  else
+    echo "${c}"
+  fi
+  done
+}
+
+switch_profile() {
+  local profile="${1}"
+  mkdir -p $HOME/.ssh
+  rm -rf $HOME/.ssh/*
+  cp -rf $HOME/.ssh-$profile/* $HOME/.ssh/
+  echo $profile > $HOME/.ssh/profile
+  if [ -f "$HOME/.ssh/init.sh" ]; then
+    bash $HOME/.ssh/init.sh
+  fi
+  chmod -R 0600 $HOME/.ssh/id_rsa* $HOME/.ssh/known_hosts
+  echo "Active profile is \"${profile}\".">&2
+}
+
+main() {
+  if [[ "$#" -eq 0 ]]; then
+    list_profiles
+  elif [[ "$#" -eq 1 ]]; then
+    if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
+      usage
+    else
+      switch_profile "${1}"
+    fi
+  else
+    echo "ERROR: too many flags" >&2
+    usage
+    exit 1
+  fi
+}
+
+main "$@"
